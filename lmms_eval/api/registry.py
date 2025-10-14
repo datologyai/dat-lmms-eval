@@ -1,7 +1,14 @@
 from typing import Callable, Dict, Union
 
-import evaluate as hf_evaluate
 from loguru import logger as eval_logger
+
+# Optional dependency: Hugging Face evaluate. Only needed for metrics not
+# registered in METRIC_REGISTRY. Guard the import to reduce required deps on
+# simple paths like ChartQA.
+try:
+    import evaluate as hf_evaluate  # type: ignore
+except Exception:  # pragma: no cover
+    hf_evaluate = None
 
 from lmms_eval.api.model import lmms
 
@@ -120,13 +127,19 @@ def get_metric(name: str, hf_evaluate_metric=False) -> Callable:
         else:
             eval_logger.warning(f"Could not find registered metric '{name}' in lm-eval, searching in HF Evaluate library...")
 
-    try:
+    # Fallback to HF evaluate only if present; otherwise raise a clear error
+    if hf_evaluate is None:
+        raise ImportError(
+            f"Metric '{name}' requires the 'evaluate' package. Install evaluate or use a registered metric."
+        )
+    try:  # pragma: no cover
         metric_object = hf_evaluate.load(name)
         return metric_object.compute
-    except Exception:
+    except Exception:  # pragma: no cover
         eval_logger.error(
             f"{name} not found in the evaluate library! Please check https://huggingface.co/evaluate-metric",
         )
+        raise
 
 
 def register_aggregation(name):

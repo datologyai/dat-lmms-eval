@@ -28,9 +28,19 @@ from typing import (
 
 import datasets
 import numpy as np
-from accelerate import Accelerator
+# Optional dependency: accelerate (only used in certain download flows)
+try:
+    from accelerate import Accelerator  # type: ignore
+except Exception:  # pragma: no cover
+    Accelerator = None
+
 from datasets import Audio, DownloadConfig, Image, Sequence
-from huggingface_hub import snapshot_download
+
+# Optional dependency: huggingface_hub snapshot_download (used for specific video/zip flows)
+try:
+    from huggingface_hub import snapshot_download  # type: ignore
+except Exception:  # pragma: no cover
+    snapshot_download = None
 from loguru import logger as eval_logger
 from PIL import Image as PIL_Image
 from PIL import ImageFile
@@ -892,7 +902,7 @@ class ConfigurableTask(Task):
                             f.write(json.dumps({task: "not downloaded"}))
 
                 hf_home = os.getenv("HF_HOME", "~/.cache/huggingface/")
-                accelerator = Accelerator()
+                accelerator = Accelerator() if Accelerator is not None else None
                 if accelerator.is_main_process:
                     dataset_kwargs.pop("From_YouTube")
                     assert "load_from_disk" not in dataset_kwargs, "load_from_disk must not be True when From_YouTube is True"
@@ -903,6 +913,8 @@ class ConfigurableTask(Task):
                         **dataset_kwargs if dataset_kwargs is not None else {},
                     )
                     dataset_kwargs["From_YouTube"] = True
+                    if snapshot_download is None:
+                        raise ImportError("huggingface_hub is required for From_YouTube download flow")
                     cache_path = snapshot_download(repo_id=self.DATASET_PATH, repo_type="dataset")  # download_parquet
                     split = vars(self.config)["test_split"]
                     task = vars(self.config)["task"]
@@ -919,7 +931,8 @@ class ConfigurableTask(Task):
                         eval_logger.info(f"Start downloading YouTube data to {video_path}...")
                         _download_from_youtube(video_path)
 
-                accelerator.wait_for_everyone()
+                if accelerator is not None:
+                    accelerator.wait_for_everyone()
                 if "builder_script" in dataset_kwargs:
                     builder_script = dataset_kwargs["builder_script"]
                     self.DATASET_PATH = os.path.join(cache_path, builder_script)
@@ -938,7 +951,7 @@ class ConfigurableTask(Task):
                 hf_home = os.path.expanduser(hf_home)
                 cache_dir = dataset_kwargs["cache_dir"]
                 cache_dir = os.path.join(hf_home, cache_dir)
-                accelerator = Accelerator()
+                accelerator = Accelerator() if Accelerator is not None else None
                 if accelerator.is_main_process:
                     force_download = dataset_kwargs.get("force_download", False)
                     force_unzip = dataset_kwargs.get("force_unzip", False)
@@ -946,6 +959,8 @@ class ConfigurableTask(Task):
                     create_link = dataset_kwargs.get("create_link", False)
                     # If the user already has a cache dir, we skip download the zip files
                     if not os.path.exists(cache_dir):
+                        if snapshot_download is None:
+                            raise ImportError("huggingface_hub is required for video dataset download flow")
                         cache_path = snapshot_download(repo_id=self.DATASET_PATH, revision=revision, repo_type="dataset", force_download=force_download, etag_timeout=60)
                         zip_files = glob(os.path.join(cache_path, "**/*.zip"), recursive=True)
                         tar_files = glob(os.path.join(cache_path, "**/*.tar*"), recursive=True)
@@ -1023,7 +1038,8 @@ class ConfigurableTask(Task):
                             os.symlink(cache_path, cache_dir)
                             eval_logger.info(f"Symbolic link created successfully: {cache_path} -> {cache_dir}")
 
-                accelerator.wait_for_everyone()
+                if accelerator is not None:
+                    accelerator.wait_for_everyone()
                 dataset_kwargs.pop("cache_dir")
                 dataset_kwargs.pop("video")
 
