@@ -1,0 +1,36 @@
+dataset_path: json
+task: "pixmo_points_eval_local"
+dataset_kwargs:
+  data_files:
+    test: /fsx/data/common/vlm-evaluation/datasets/pixmo_points_eval/pixmo_points_eval.jsonl
+output_type: generate_until
+doc_to_visual: !function utils.pixmo_points_eval_doc_to_visual
+doc_to_text: !function utils.pixmo_points_eval_doc_to_text
+doc_to_target: "points"
+generation_kwargs:
+  max_new_tokens: 32
+  temperature: 0
+  do_sample: False
+process_results: !function utils.pixmo_points_eval_process_results
+metric_list:
+  - metric: precision
+    aggregation: mean
+    higher_is_better: true
+  - metric: recall
+    aggregation: mean
+    higher_is_better: true
+  - metric: f1
+    aggregation: mean
+    higher_is_better: true
+  - metric: no_target_correct
+    aggregation: mean
+    higher_is_better: true
+  - metric: parsing_failure
+    aggregation: mean
+    higher_is_better: false
+metadata:
+  - version: 0.0
+lmms_eval_specific_kwargs:
+  default:
+    pre_prompt: "<image>\n"
+    post_prompt: ""

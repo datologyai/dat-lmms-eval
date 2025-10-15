@@ -1,3 +1,17 @@
+"""
+Datology RealWorldQA customizations
+
+Deviations from upstream lmms-eval:
+- Prompt: we keep the raw multiple-choice question text (which already includes choices)
+  and do not append extra instructions by default.
+- Scoring: we extract a concise final answer (prefers last "Answer:"), map number words
+  to digits, robustly parse a final choice letter from either the final answer line
+  or the full output, and finally exact-match against the lowercase GT.
+
+The original minimal logic (lower/strip and exact match) is kept below as a
+commented reference and considered deprecated.
+"""
+
 import re
 
 from lmms_eval.filters.extraction import ExtendedRegexFilter
@@ -32,15 +46,111 @@ def realworldqa_doc_to_text(doc, lmms_eval_specific_kwargs=None):
 
 
 def realworldqa_process_results(doc, results):
-    pred = results[0].lower().strip().rstrip(".")
-    gt_ans = doc["answer"].lower().strip()
+    pred_raw = results[0] if results else ""
+    gt_ans = str(doc.get("answer", "")).lower().strip()
 
-    print(f"Prediction: {pred}, Ground Truth: {gt_ans}")
-    # assert gt_ans in ["a", "b", "c", "d"]
-    score = 1.0 if pred == gt_ans else 0.0
-    return {
-        "exact_match": score,
+    # 1) Prefer concise final answer line
+    def _extract_final(text: str) -> str:
+        if not isinstance(text, str):
+            return ""
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        for ln in reversed(lines):
+            m = re.match(r"(?i)^\s*answer\s*:\s*(.+)$", ln)
+            if m:
+                return m.group(1).strip()
+        # fallback: last short non-empty line
+        for ln in reversed(lines):
+            if len(ln.split()) <= 10:
+                return ln
+        return str(text).strip()
+
+    final_pred = _extract_final(pred_raw)
+
+    # 2) Map number words to digits
+    num_map = {
+        "zero": "0","one": "1","two": "2","three": "3","four": "4",
+        "five": "5","six": "6","seven": "7","eight": "8","nine": "9","ten": "10",
     }
+    filtered = num_map.get(final_pred.lower().strip(), final_pred)
+
+    # 3) Parse letter from final line or full output; or fuzzy map choice text
+    qtext = str(doc.get("question", ""))
+    def _parse_choices_from_question(question_text: str):
+        choices = {}
+        for line in (question_text or "").splitlines():
+            m = re.match(r"\s*([A-Ea-e])\s*\.\s*(.+)$", line)
+            if m:
+                letter = m.group(1).lower(); txt = m.group(2).strip()
+                # normalize for fuzzy match
+                txtN = re.sub(r"[^a-z0-9\s]", " ", txt.lower())
+                txtN = re.sub(r"\s+", " ", txtN).strip()
+                choices[letter] = txtN
+        return choices
+
+    choices_map = _parse_choices_from_question(qtext)
+
+    def _norm_letter(s: str):
+        s = (s or "").strip().upper()
+        return s if s in {"A","B","C","D","E"} else None
+
+    # Try explicit letter in concise final answer
+    letter = _norm_letter(filtered)
+    if not letter:
+        # Try extracting from raw output
+        lines = [ln.strip() for ln in str(pred_raw).splitlines() if ln.strip()]
+        for ln in reversed(lines):
+            m = re.match(r"(?i)^\s*answer\s*:\s*(.+)$", ln)
+            if m:
+                ans = m.group(1).strip()
+                m1 = re.search(r"\b([A-Ea-e])\b", ans)
+                if m1:
+                    letter = m1.group(1).upper(); break
+                m2 = re.search(r"(?:^|\s)[\(\[]?([A-Ea-e])[\)\]\.!?,]?(?:\s|$)", ans)
+                if m2:
+                    letter = m2.group(1).upper(); break
+        if not letter:
+            # Look for last short line letter
+            for ln in reversed(lines):
+                if len(ln.split()) <= 10:
+                    m1 = re.search(r"\b([A-Ea-e])\b", ln)
+                    if m1:
+                        letter = m1.group(1).upper(); break
+                    m2 = re.search(r"(?:^|\s)[\(\[]?([A-Ea-e])[\)\]\.!?,]?(?:\s|$)", ln)
+                    if m2:
+                        letter = m2.group(1).upper(); break
+
+    # Fuzzy map choice text if no letter
+    if not letter and choices_map:
+        def _norm(s: str) -> str:
+            s = (s or "").lower()
+            s = re.sub(r"[^a-z0-9\s]", " ", s)
+            s = re.sub(r"\s+", " ", s).strip()
+            return s
+        predN = _norm(filtered)
+        best = None; best_score = 0.0
+        for lett, txt in choices_map.items():
+            sa = set(txt.split()); sb = set(predN.split())
+            if not sa:
+                continue
+            j = len(sa & sb) / float(len(sa))
+            if j > best_score:
+                best_score = j; best = lett
+        if best is not None and best_score >= 0.8:
+            letter = best.upper()
+
+    # 4) Normalize and exact-match
+    pred_norm = (letter or filtered or "").lower().strip().rstrip('.')
+    score = 1.0 if pred_norm == gt_ans and pred_norm != "" else 0.0
+    return {"exact_match": score}
+
+"""
+Deprecated upstream logic for reference:
+
+def realworldqa_process_results(doc, results):
+    pred = results[0].lower().strip().rstrip('.')
+    gt_ans = doc['answer'].lower().strip()
+    return { 'exact_match': 1.0 if pred == gt_ans else 0.0 }
+"""
 
 
 class NumberWordsToDigitsFilter(MapFilter):

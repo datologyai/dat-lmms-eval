@@ -1,3 +1,18 @@
+"""
+Datology ChartQA customizations
+
+Deviations from upstream lmms-eval:
+- Prompt: we keep our historical format with a leading image token and explicit
+  instruction + trailing "Answer:" line.
+- Scoring: extract concise final answer, add pragmatic normalizations (trailing
+  periods/currency symbols/decimal commas), align list/percent/text to GT when
+  equivalent, then apply relaxed correctness (5% tolerance, list order-insensitive,
+  normalized text). This is slightly more permissive on edge cases than vanilla.
+
+The original upstream relaxed correctness is preserved in structure; older
+Datology wrapper (datology_utils) is now inlined here for a single entry point.
+"""
+
 # lmms-eval original (deprecated): doc_to_visual kept
 def chartqa_doc_to_visual(doc):
     return [doc["image"].convert("RGB")]

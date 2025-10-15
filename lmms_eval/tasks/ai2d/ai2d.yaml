@@ -7,12 +7,13 @@ output_type: generate_until
 doc_to_visual: !function utils.ai2d_doc_to_visual
 doc_to_text: !function utils.ai2d_doc_to_text
 doc_to_target: !function utils.ai2d_doc_to_target
+process_results: !function utils.ai2d_process_results
   
 lmms_eval_specific_kwargs:
   default:
     prompt_format: mcq
-    pre_prompt: ""
-    post_prompt: "\nAnswer with the option's letter from the given choices directly."
+    pre_prompt: "<image>\n"
+    post_prompt: "\nAnswer with exactly one uppercase letter (A/B/C/D) only. No words, punctuation, or explanation.\nAnswer:"
   gpt4v: 
     prompt_format: mcq
     pre_prompt: ""

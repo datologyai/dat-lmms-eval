@@ -1,3 +1,14 @@
+"""
+Datology VQAv2 customizations
+
+Deviations from upstream lmms-eval:
+- Prompt: keep the default short instruction (single word/phrase), as in our runs.
+- Scoring: we first extract a concise final answer (prefers last "Answer:"), then
+  apply EvalAI normalization before exact-match aggregation, to better handle CoT.
+
+Original upstream logic is preserved in structure; we only add the final-answer extraction.
+"""
+
 import datetime
 import json
 import os
@@ -17,7 +28,19 @@ def vqav2_doc_to_visual(doc):
 def vqav2_process_results(doc, result):
     eval_ai_processor = EvalAIAnswerProcessor()
     assert len(result) == 1, f"The result should be a list of length 1, but got {len(result)}."
-    resAns = result[0]
+    # Extract concise final answer if present (handles CoT/ERMA style outputs)
+    def _extract_final(text: str) -> str:
+        if not isinstance(text, str):
+            return ""
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        for ln in reversed(lines):
+            m = re.match(r"(?i)^\s*(?:final\s+answer|answer)\s*:\s*(.+)$", ln)
+            if m:
+                ans = m.group(1).strip()
+                return re.sub(r"\s+", " ", ans).strip()
+        return re.sub(r"\s+", " ", (text or "")).strip()
+
+    resAns = _extract_final(result[0])
     accuracy = 0
 
     if "answers" in doc and doc["answers"] is not None:
