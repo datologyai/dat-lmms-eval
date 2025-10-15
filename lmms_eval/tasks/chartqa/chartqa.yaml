@@ -11,6 +11,7 @@ generation_kwargs:
   max_new_tokens: 16
   temperature: 0
   do_sample: False
+# Datology: route process_results through our compatibility wrapper
 process_results: !function utils.chartqa_process_results
 metric_list:
   - metric: relaxed_overall
@@ -25,10 +26,10 @@ metric_list:
 metadata:
   - version: 0.0
 lmms_eval_specific_kwargs:
+  # Datology defaults align with our previous prompt style
   default:
-    pre_prompt: ""
-    post_prompt: "\nAnswer the question with a single word."
+    pre_prompt: "<image>\n"
+    post_prompt: "\nAnswer the question using a single word, number, or phrase.\nAnswer:"
   qwen_vl:
-    pre_prompt: ""
+    pre_prompt: "<image>\n"
     post_prompt: " Answer:"
-
