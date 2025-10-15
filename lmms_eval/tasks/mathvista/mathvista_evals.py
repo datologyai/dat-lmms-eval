@@ -217,53 +217,86 @@ class MathVistaEvaluator:
         return full_prompt
 
     def extract_answer(self, response, problem, quick_extract=False):
+        """Extract a concise answer string from model response without external API calls.
+
+        We avoid LLM-as-judge here and instead use lightweight heuristics so that
+        inference remains handled by our own server, consistent with other evals.
+        """
         question_type = problem["question_type"]
         answer_type = problem["answer_type"]
         choices = problem.get("choices", [])
-        query = problem["query"]
+        query = problem.get("query", "")
 
         if not response:
             return ""
 
-        if question_type == "multi_choice" and response in choices:
-            return response
+        text = str(response).strip()
 
-        if answer_type == "integer":
-            try:
-                extraction = int(response)
-                return str(extraction)
-            except ValueError:
-                pass
+        # 1) If multi-choice and the full choice text appears verbatim
+        if question_type == "multi_choice" and choices:
+            for ch in choices:
+                if ch.lower() in text.lower():
+                    return ch
 
-        if answer_type == "float":
-            try:
-                extraction = str(float(response))
-                return extraction
-            except ValueError:
-                pass
-
-        # quick extraction
-        if quick_extract:
-            eval_logger.info("Quickly extracting answer...")
-            # The answer is "text". -> "text"
-            try:
-                result = re.search(r'The answer is "(.*)"\.', response)
-                if result:
-                    extraction = result.group(1)
-                    return extraction
-            except re.error:
-                pass
-
-        # general extraction
+        # 2) Try to capture an explicit final answer line like 'Answer: ...'
         try:
-            full_prompt = self.create_test_prompt(DEMO_PROMPT, query, response)
-            extraction = self.get_chat_response(full_prompt, temperature=0, max_tokens=256, n=1)
-            return extraction
-        except Exception as e:
-            eval_logger.error(e)
-            eval_logger.error(f"Error in extracting answer for problem")
+            # Search from the end for an 'Answer: xxx' style token
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            for ln in reversed(lines):
+                m = re.search(r"^answer\s*:\s*(.+)$", ln, flags=re.IGNORECASE)
+                if m:
+                    cand = m.group(1).strip()
+                    # Normalize basic quotes
+                    cand = cand.strip('"\'')
+                    return cand
+        except Exception:
+            pass
 
-        return ""
+        # 3) Quick extraction patterns used upstream
+        try:
+            result = re.search(r'The answer is "(.*)"\.', text)
+            if result:
+                return result.group(1)
+        except re.error:
+            pass
+
+        # 4) Numeric extraction for integer/float answers (prefer last number)
+        if answer_type in ("integer", "float"):
+            nums = re.findall(r"[-+]?\d*\.\d+|[-+]?\b\d+\b", text)
+            if nums:
+                last = nums[-1]
+                if answer_type == "integer":
+                    try:
+                        return str(int(float(last)))
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        # Keep as canonical float string
+                        return str(float(last))
+                    except Exception:
+                        pass
+
+        # 5) As a last resort, if multi-choice and a single letter appears
+        if question_type == "multi_choice" and choices:
+            # Extract letter like (A) or 'Answer: B'
+            letter = None
+            m = re.search(r"\(([A-Da-d])\)", text)
+            if m:
+                letter = m.group(1).upper()
+            m2 = re.search(r"answer\s*:\s*([A-Da-d])\b", text, flags=re.IGNORECASE)
+            if m2:
+                letter = (m2.group(1)).upper()
+            if letter is not None:
+                try:
+                    idx = ord(letter) - ord('A')
+                    if 0 <= idx < len(choices):
+                        return choices[idx]
+                except Exception:
+                    pass
+
+        # 6) Fallback: return the raw response (will be normalized later)
+        return text
 
     def get_most_similar(self, prediction, choices):
         """

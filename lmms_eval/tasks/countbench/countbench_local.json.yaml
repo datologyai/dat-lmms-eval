@@ -3,6 +3,7 @@ task: "countbench_local"
 dataset_kwargs:
   data_files:
     test: /fsx/data/common/vlm-evaluation/datasets/countbench/countbench.jsonl
+test_split: test
 output_type: generate_until
 doc_to_visual: !function utils.countbench_doc_to_visual
 doc_to_text: !function utils.countbench_doc_to_text

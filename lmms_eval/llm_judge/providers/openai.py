@@ -18,13 +18,16 @@ class OpenAIProvider(ServerInterface):
     def __init__(self, config: Optional[ServerConfig] = None):
         super().__init__(config)
         self.api_key = os.getenv("OPENAI_API_KEY", "")
-        self.api_url = os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions/v1")
+        # REST endpoint for requests fallback
+        self.api_url = os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions")
 
         # Initialize OpenAI client
         try:
             from openai import OpenAI
 
-            self.client = OpenAI(api_key=self.api_key, base_url=self.api_url)
+            # The OpenAI client expects a base URL without the resource path
+            client_base = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+            self.client = OpenAI(api_key=self.api_key, base_url=client_base)
             self.use_client = True
         except ImportError:
             eval_logger.warning("OpenAI client not available, falling back to requests")

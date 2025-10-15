@@ -21,6 +21,8 @@ These keys aggregate cleanly via mean in lmms-eval.
 import re
 from typing import Dict, List, Tuple
 from PIL import Image
+import os
+from pathlib import Path
 
 import numpy as np
 
@@ -30,6 +32,54 @@ except Exception:  # pragma: no cover
     linear_sum_assignment = None  # type: ignore
 
 
+def _open_image_with_fallbacks(path_str: str):
+    """Try opening an image path with fallbacks for mismatched dataset roots.
+
+    Some local JSONLs were authored with a prefix like
+    /fsx/data/common/vlm-evaluation/datasets/download/... while images actually
+    live under /fsx/data/common/vlm-evaluation/download/.... This helper tries a
+    few safe rewrites before giving up.
+    """
+    candidates = [path_str]
+
+    # If a custom datasets root is provided (e.g., HF cache mount), prefer it
+    # by stitching the path segment after '/vlm-evaluation/'.
+    env_root = os.environ.get("VLM_EVAL_DATA_ROOT_DIR")
+    if env_root and "/vlm-evaluation/" in path_str:
+        try:
+            tail = path_str.split("/vlm-evaluation/", 1)[1]
+            candidates.append(str(Path(env_root) / tail))
+        except Exception:
+            pass
+
+    # Replace '/datasets/download/' with '/download/'
+    if "/vlm-evaluation/datasets/download/" in path_str:
+        candidates.append(path_str.replace(
+            "/vlm-evaluation/datasets/download/", "/vlm-evaluation/download/"
+        ))
+
+    # Replace '/vlm-evaluation/datasets/' with '/vlm-evaluation/'
+    if "/vlm-evaluation/datasets/" in path_str:
+        candidates.append(path_str.replace(
+            "/vlm-evaluation/datasets/", "/vlm-evaluation/"
+        ))
+
+    for cand in candidates:
+        try:
+            if os.path.exists(cand):
+                return Image.open(cand).convert("RGB")
+        except Exception:
+            continue
+    # Final attempt: if string is a valid Path pointing to a file
+    try:
+        p = Path(path_str)
+        if p.exists():
+            return Image.open(p).convert("RGB")
+    except Exception:
+        pass
+    return None
+
+
 def pixmo_points_eval_doc_to_visual(doc):
     """Return image as PIL. Supports either in-memory image or img_path string."""
     img = doc.get("image")
@@ -37,10 +87,10 @@ def pixmo_points_eval_doc_to_visual(doc):
         return [img.convert("RGB")]
     path = doc.get("img_path") or doc.get("image_path")
     if isinstance(path, str):
-        try:
-            return [Image.open(path).convert("RGB")]
-        except Exception:
-            return []
+        img_obj = _open_image_with_fallbacks(path)
+        if img_obj is not None:
+            return [img_obj]
+        return []
     return []
 
 

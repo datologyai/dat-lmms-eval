@@ -15,6 +15,54 @@ Notes:
 import re
 from typing import Dict, List, Optional
 from PIL import Image
+import os
+from pathlib import Path
+
+
+def _open_image_with_fallbacks(path_str: str):
+    """Try opening an image path with fallbacks for mismatched dataset roots.
+
+    Handles cases where JSONLs reference
+    /fsx/data/common/vlm-evaluation/datasets/download/... but the actual files
+    reside under /fsx/data/common/vlm-evaluation/download/....
+    """
+    candidates = [path_str]
+
+    # Honor optional custom datasets root (e.g., HF cache mount)
+    env_root = os.environ.get("VLM_EVAL_DATA_ROOT_DIR")
+    if env_root and "/vlm-evaluation/" in path_str:
+        try:
+            tail = path_str.split("/vlm-evaluation/", 1)[1]
+            candidates.append(str(Path(env_root) / tail))
+        except Exception:
+            pass
+
+    # Replace '/datasets/download/' with '/download/'
+    if "/vlm-evaluation/datasets/download/" in path_str:
+        candidates.append(path_str.replace(
+            "/vlm-evaluation/datasets/download/", "/vlm-evaluation/download/"
+        ))
+
+    # Replace '/vlm-evaluation/datasets/' with '/vlm-evaluation/'
+    if "/vlm-evaluation/datasets/" in path_str:
+        candidates.append(path_str.replace(
+            "/vlm-evaluation/datasets/", "/vlm-evaluation/"
+        ))
+
+    for cand in candidates:
+        try:
+            if os.path.exists(cand):
+                return Image.open(cand).convert("RGB")
+        except Exception:
+            continue
+    # Final attempt via Path
+    try:
+        p = Path(path_str)
+        if p.exists():
+            return Image.open(p).convert("RGB")
+    except Exception:
+        pass
+    return None
 
 
 def countbench_doc_to_visual(doc):
@@ -25,10 +73,10 @@ def countbench_doc_to_visual(doc):
     # Fallback to img_path
     path = doc.get("img_path") or doc.get("image_path")
     if isinstance(path, str):
-        try:
-            return [Image.open(path).convert("RGB")]
-        except Exception:
-            return []
+        img_obj = _open_image_with_fallbacks(path)
+        if img_obj is not None:
+            return [img_obj]
+        return []
     return []
 
 

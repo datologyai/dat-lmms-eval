@@ -3,6 +3,7 @@ task: "pixmo_points_eval_local"
 dataset_kwargs:
   data_files:
     test: /fsx/data/common/vlm-evaluation/datasets/pixmo_points_eval/pixmo_points_eval.jsonl
+test_split: test
 output_type: generate_until
 doc_to_visual: !function utils.pixmo_points_eval_doc_to_visual
 doc_to_text: !function utils.pixmo_points_eval_doc_to_text
